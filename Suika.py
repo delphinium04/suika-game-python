@@ -36,7 +36,7 @@ RADIUS_ORDER: list = [15, 22, 29, 40, 55, 70, 85, 100, 120]
 COOLDOWN_DURATION = 1000  # 0초 1000 = 1초
 
 
-def get_next_radius(cur_radius):
+def get_next_ball_index(cur_radius):
     """ return -1 if radius is max level """
     if cur_radius == RADIUS_ORDER[-1]:
         return -1
@@ -71,7 +71,7 @@ class Game:
                 self.body = pm.Body(body_type=pm.Body.KINEMATIC)
             else:
                 self.body = pm.Body(10000000, 1)
-                self.body.velocity_func = Game.custom_gravity
+                self.body.velocity_func = Game.apply_center_attraction
 
             self.body.position = pos
             self.shape = pm.Circle(body=self.body, radius=radius)
@@ -155,12 +155,12 @@ class Game:
         while not self.done:
             self.dt = self.clock.tick(60) / 1000
             if self.game_over:
-                self.show_exit_menu()
+                self.handle_game_over_screen()
             else:
                 self.handle_events()
-                self.run_logic()
-                self.check_collision()
-                self.check_end()
+                self.update_physics_and_sprites()
+                self.merge_colliding_equal_balls()
+                self.check_ball_touched_boundary()
                 self.draw()
                 self.current_fps = self.clock.get_fps()
 
@@ -168,7 +168,7 @@ class Game:
         pg.quit()
         exit()
 
-    def show_exit_menu(self):
+    def handle_game_over_screen(self):
         font = pg.font.Font(None, 36)
         game_over_text_lines = [
             "GAME OVER",
@@ -214,18 +214,18 @@ class Game:
                 # 80 < X < SCREENSIZE.X - 80
                 x = max(80, min(mouse_pos[0], SCREEN_SIZE[0] - 80))
                 y = PREVIEW_BALL_OFFSET_Y
-                self.generate_ball(x, y)
+                self.spawn_ball(x, y)
 
                 next_index = random.choices(
                     self.ball_range, weights=self.ball_probability, k=1)[0]
                 self.next_ball_color = COLOR_ORDER[next_index]
                 self.next_ball_radius = RADIUS_ORDER[next_index]
 
-    def run_logic(self):
+    def update_physics_and_sprites(self):
         self.space.step(1/60)
         self.all_sprites.update()
 
-    def change_probability(self):
+    def update_spawn_probabilities(self):
         if 4 <= self.score < 12:
             self.ball_probability = [0.55, 0.4, 0.05, 0, 0, 0, 0, 0, 0]
         elif 12 <= self.score < 32:
@@ -236,7 +236,7 @@ class Game:
             self.ball_probability = [0.1, 0.35, 0.27, 0.18, 0.1, 0, 0, 0, 0]
         return
 
-    def check_collision(self):
+    def merge_colliding_equal_balls(self):
         # if ball merged -> return
         for i in range(len(self.balls)):
             for j in range(i+1, len(self.balls)):
@@ -245,8 +245,8 @@ class Game:
                 is_hit = len(point_set.points) != 0  # 접점
                 # hit and level is same
                 if is_hit and ball_i.get_radius() == ball_j.get_radius():
-                    next_index = get_next_radius(ball_i.get_radius())
-                    self.change_probability()
+                    next_index = get_next_ball_index(ball_i.get_radius())
+                    self.update_spawn_probabilities()
                     # if level is NOT max generate new ball
                     if next_index != -1:
                         target_pos = ((ball_i.get_position()[0] + ball_j.get_position()[0])/2,
@@ -258,7 +258,7 @@ class Game:
                         self.score += SCORE_ORDER[next_index-1]
                     else:
                         self.score += SCORE_ORDER[-1]
-                    self.remove_ball(ball_i, ball_j)
+                    self.despawn_balls(ball_i, ball_j)
                     return
 
     def draw(self):
@@ -295,14 +295,14 @@ class Game:
 
         pg.display.flip()
 
-    def check_end(self):
+    def check_ball_touched_boundary(self):
         for ball in self.balls:
             if ball.shape.shapes_collide(self.wall_left_shape).points or \
                     ball.shape.shapes_collide(self.wall_right_shape).points or \
                     ball.shape.shapes_collide(self.wall_bottom_shape).points:
                 self.game_over = True
 
-    def generate_ball(self, x, y):
+    def spawn_ball(self, x, y):
         ball = self.Ball((x, y), self.next_ball_radius,
                          self.next_ball_color, self.space)
         ball.set_color(self.next_ball_color)
@@ -310,14 +310,14 @@ class Game:
         self.balls.append(ball)
         self.all_sprites.add(ball)
 
-    def remove_ball(self, *args):
+    def despawn_balls(self, *args):
         for ball in args:
             if ball in self.balls:
                 self.balls.remove(ball)
             ball.kill()
             self.space.remove(ball.shape, ball.body)
 
-    def custom_gravity(self: pm.Body, gravity, damping, dt):
+    def apply_center_attraction(self: pm.Body, gravity, damping, dt):
         current_coord = self.position
         target_vec = ((SCREEN_SIZE[0]/2 - current_coord[0])*2,
                       (SCREEN_SIZE[1]/2 - current_coord[1])*2)
