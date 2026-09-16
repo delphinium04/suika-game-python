@@ -3,7 +3,6 @@ import random
 import pygame as pg
 import pymunk as pm
 import pymunk.pygame_util
-from pymunk import Vec2d
 
 
 '''
@@ -38,16 +37,11 @@ COOLDOWN_DURATION = 1000  # 0초 1000 = 1초
 
 
 def get_next_radius(cur_radius):
-    ''' return -1 if radius is max level '''
+    """ return -1 if radius is max level """
     if cur_radius == RADIUS_ORDER[-1]:
         return -1
     index = RADIUS_ORDER.index(cur_radius)
     return index + 1
-
-
-def flipy(p):
-    """Convert chipmunk physics to pygame coordinates."""
-    return Vec2d(p[0], -p[1]+800)
 
 
 class Game:
@@ -64,13 +58,14 @@ class Game:
                 self.image = pg.image.load(self.link)
                 self.image = pg.transform.scale(
                     self.image, (radius*2, radius*2))
+                self.original_image = self.image
 
             else:
                 print("Surface ERROR")
 
             # pg.draw.circle(self.image, self.color, (radius+1, radius+1), radius)
             # self.rect = self.image.get_rect(topleft=pos)# 임시 비활성화
-            self.rect = self.image.get_rect(center=flipy(pos))
+            self.rect = self.image.get_rect(center=pos)
 
             if is_static:
                 self.body = pm.Body(body_type=pm.Body.KINEMATIC)
@@ -88,10 +83,9 @@ class Game:
             self.space.add(self.body, self.shape)
 
         def update(self):
-            self.rect.center = flipy(self.body.position)
             # Use the body's angle to rotate the image.
             self.image = pg.transform.rotozoom(
-                self.image, math.degrees(self.body.angle), 1)
+                self.original_image, math.degrees(self.body.angle), 1)
             self.rect = self.image.get_rect(center=self.get_position())
 
         def get_radius(self):
@@ -111,7 +105,9 @@ class Game:
             return self.body.position
 
     def __init__(self):
-        # Pygame Setting
+        # pygame Setting
+        self.current_fps = None
+        self.dt = None
         pg.init()
         self.screen = pg.display.set_mode(SCREEN_SIZE)
         self.done = False
@@ -124,7 +120,7 @@ class Game:
         self.score = 0
         self.ball_probability = [0.7, 0.3, 0, 0, 0, 0, 0, 0, 0]
 
-        self.balls: list[self.Ball] = []
+        self.balls: list[Game.Ball] = []
         self.ball_range = range(len(SCORE_ORDER))
         self.random_int = random.choices(
             self.ball_range, weights=self.ball_probability, k=1)[0]
@@ -230,11 +226,11 @@ class Game:
         self.all_sprites.update()
 
     def change_probability(self):
-        if self.score >= 4 and self.score < 12:
+        if 4 <= self.score < 12:
             self.ball_probability = [0.55, 0.4, 0.05, 0, 0, 0, 0, 0, 0]
-        elif self.score >= 12 and self.score < 32:
+        elif 12 <= self.score < 32:
             self.ball_probability = [0.35, 0.35, 0.25, 0.05, 0, 0, 0, 0, 0]
-        elif self.score >= 32 and self.score < 128:
+        elif 32 <= self.score < 128:
             self.ball_probability = [0.2, 0.35, 0.25, 0.15, 0.05, 0, 0, 0, 0]
         elif self.score >= 128:
             self.ball_probability = [0.1, 0.35, 0.27, 0.18, 0.1, 0, 0, 0, 0]
@@ -245,8 +241,8 @@ class Game:
         for i in range(len(self.balls)):
             for j in range(i+1, len(self.balls)):
                 ball_i, ball_j = self.balls[i], self.balls[j]
-                pointSet = ball_i.shape.shapes_collide(ball_j.shape)
-                is_hit = len(pointSet.points) != 0  # 접점
+                point_set = ball_i.shape.shapes_collide(ball_j.shape)
+                is_hit = len(point_set.points) != 0  # 접점
                 # hit and level is same
                 if is_hit and ball_i.get_radius() == ball_j.get_radius():
                     next_index = get_next_radius(ball_i.get_radius())
@@ -258,6 +254,7 @@ class Game:
                         new_ball = self.Ball(
                             target_pos, RADIUS_ORDER[next_index], COLOR_ORDER[next_index], self.space)
                         self.balls.append(new_ball)
+                        self.all_sprites.add(new_ball)
                         self.score += SCORE_ORDER[next_index-1]
                     else:
                         self.score += SCORE_ORDER[-1]
@@ -275,12 +272,6 @@ class Game:
         mouse_x = max(80, min(pg.mouse.get_pos()[0], SCREEN_SIZE[1] - 80))
         pg.draw.circle(self.screen, self.next_ball_color,
                        (mouse_x, PREVIEW_BALL_OFFSET_Y), self.next_ball_radius)
-
-        for ball in self.balls:
-            pos = ball.get_position()
-            rect = ball.image.get_rect(center=pos)
-            # rect가 아니고 pos 였다가 위에 rect정의 해주니까
-            self.screen.blit(ball.image, rect)
 
         # color order draw
         colors_coord_y = SCREEN_SIZE[1] - 20
@@ -317,18 +308,20 @@ class Game:
         ball.set_color(self.next_ball_color)
         ball.set_position((x, y))
         self.balls.append(ball)
+        self.all_sprites.add(ball)
 
     def remove_ball(self, *args):
         for ball in args:
             if ball in self.balls:
                 self.balls.remove(ball)
+            ball.kill()
             self.space.remove(ball.shape, ball.body)
 
-    def custom_gravity(body: pm.Body, gravity, damping, dt):
-        current_coord = body.position
+    def custom_gravity(self: pm.Body, gravity, damping, dt):
+        current_coord = self.position
         target_vec = ((SCREEN_SIZE[0]/2 - current_coord[0])*2,
                       (SCREEN_SIZE[1]/2 - current_coord[1])*2)
-        pymunk.Body.update_velocity(body, target_vec, damping, dt)
+        pymunk.Body.update_velocity(self, target_vec, damping, dt)
 
 
 if __name__ == '__main__':
